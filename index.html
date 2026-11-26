@@ -336,7 +336,11 @@ window.CONFIG = {
     }
     $("dbInfo").textContent = `ฐานข้อมูล ${data.items.length.toLocaleString()} รายการ · อัปเดต ${data.updated || "-"}${offline ? " · ออฟไลน์" : ""}`;
   }
+  // บาร์โค้ดภายในร้าน 13 หลักขึ้นต้นด้วย 250000 → Art No คือหลักที่ 7–12 (เช่น 2500002503151 → 250315)
+  const inStoreArt = (code) => /^250000\d{7}$/.test(code) ? code.slice(6, 12).replace(/^0+(?=.)/, "") : "";
   function lookup(code) {
+    const art25 = inStoreArt(code);
+    if (art25 && byArt.has(art25)) return [byArt.get(art25)];
     const k = norm(code), hits = byBarcode.get(k);
     if (hits && hits.length) return hits;
     const a = byArt.get(k);
@@ -412,7 +416,9 @@ window.CONFIG = {
       $("choices").innerHTML = hits.map((h, i) => `<button data-i="${i}"><b>${esc(h.artNo)}</b><span>${esc(h.descr)}</span></button>`).join("");
       return;
     }
-    commit(base, hits[0] || null, false);
+    const art25 = inStoreArt(barcode);
+    // ไม่อยู่ในฐานข้อมูล แต่เป็นบาร์โค้ด 25… → ยังได้ Art No จากหลัก 7–12
+    commit(base, hits[0] || (art25 ? { artNo: art25, descr: "", dept: "", notInDb: true } : null), false);
   }
   $("choices").addEventListener("click", (e) => {
     const b = e.target.closest("button[data-i]"); if (!b || !pendingChoice) return;
@@ -440,18 +446,19 @@ window.CONFIG = {
     const isNew = !line;
     if (isNew) {
       line = { key, barcode: base.barcode, artNo: product ? product.artNo : "", descr: product ? product.descr : "",
-        dept: product ? product.dept : "", size: base.size, qty: 0, found: !!product, pending: 0, sheetQty: null };
+        dept: product ? product.dept : "", size: base.size, qty: 0, found: !!product && !product.notInDb, pending: 0, sheetQty: null };
     } else lines.splice(lines.indexOf(line), 1);
     lines.unshift(line);                       // ย้ายขึ้นบนสุด
     line.qty += base.qty;
     queueEvent(line, base.qty, base.barcode);
     saveLines();
     if (!quiet) {
-      beep(product ? "ok" : "warn");
-      setHero(product ? "ok" : "warn", {
+      const ok = product && !product.notInDb;
+      beep(ok ? "ok" : "warn");
+      setHero(ok ? "ok" : "warn", {
         chip: ["wait", ICON.clock, isNew ? "กำลังบันทึก…" : `เพิ่ม +${base.qty} · กำลังบันทึก…`],
         size: `${line.size} · ${line.qty} ป้าย`, sz: line.size,
-        art: line.artNo, desc: product ? line.descr : "ไม่พบในฐานข้อมูล", code: base.barcode
+        art: line.artNo, desc: ok ? line.descr : "ไม่พบในฐานข้อมูล", code: base.barcode
       });
       heroKey = key;
       if (!isNew) bump();
