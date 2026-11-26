@@ -24,6 +24,8 @@ window.CONFIG = {
   PRODUCTS_URL: "products.json",
   // เสียง/สั่นเมื่อสแกน
   BEEP: true,
+  // ดึงรายการจากชีตทุกกี่วินาที (สะท้อนการลบ/แก้ไขจากหลังบ้าน)
+  SYNC_SECONDS: 20,
   // เปิดปุ่มกล้องสำหรับมือถือที่ไม่มีหัวสแกน (true/false)
   ENABLE_CAMERA: false
 };
@@ -249,7 +251,7 @@ window.CONFIG = {
 
   <section class="card">
     <div class="list-head">
-      <h2>รายการวันนี้</h2>
+      <h2>รายการรอพิมพ์วันนี้</h2>
       <div class="stats"><span id="statScans">0 สแกน</span><span id="statTags">0 ป้าย</span></div>
     </div>
     <div id="list"></div>
@@ -264,7 +266,7 @@ window.CONFIG = {
   const C = window.CONFIG;
   const $ = (id) => document.getElementById(id);
   const SIZES = ["A3", "A4", "A5", "A6"];
-  const LS = { outbox: "ptag_outbox2", lines: "ptag_lines", size: "ptag_size", qty: "ptag_qty" };
+  const LS = { outbox: "ptag_outbox3", rows: "ptag_rows", size: "ptag_size", qty: "ptag_qty" };
   const DB_CACHE = "ptag-db-v1";
   const params = new URLSearchParams(location.search);
   const BRANCH = params.get("branch") || C.BRANCH || "";
@@ -284,7 +286,6 @@ window.CONFIG = {
   const save = (k, v) => { try { localStorage.setItem(k, JSON.stringify(v)); } catch {} };
 
   let outbox = load(LS.outbox, []);
-  let lines = load(LS.lines, []);      // รายการรวม (สินค้า+ขนาด) พร้อมจำนวน
   let currentSize = params.get("size") || load(LS.size, C.DEFAULT_SIZE || "A4");
 
   const esc = (s) => String(s ?? "").replace(/[&<>"']/g, c => ({ "&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;" }[c]));
@@ -374,7 +375,7 @@ window.CONFIG = {
   // ---------- โฟกัสช่องบาร์โค้ด ----------
   function focusBarcode() { const el = $("barcode"); if (document.activeElement !== el) el.focus({ preventScroll: true }); }
   document.addEventListener("click", (e) => { if (!isEditable(e.target) && !e.target.closest("button")) focusBarcode(); });
-  document.addEventListener("visibilitychange", () => { if (!document.hidden) { focusBarcode(); flush(); } });
+  document.addEventListener("visibilitychange", () => { if (!document.hidden) { focusBarcode(); flush(); sync(); } });
   $("btnKeyboard").addEventListener("click", () => {
     const el = $("barcode"); el.setAttribute("inputmode", "text"); el.blur(); setTimeout(() => el.focus(), 30);
     el.addEventListener("blur", () => el.setAttribute("inputmode", "none"), { once: true });
@@ -426,49 +427,56 @@ window.CONFIG = {
     commit(pc, pc.options[+b.dataset.i], false); focusBarcode();
   });
 
-  // ---------- รวมรายการ: สินค้าเดิม + ขนาดเดิม = บรรทัดเดียว เพิ่มจำนวน ----------
-  const todayStr = () => new Date().toLocaleDateString("en-CA");
-  const lineKeyOf = (p, barcode, size) => `${todayStr()}|${p ? "A" + p.artNo : "B" + norm(barcode)}|${size}`;
-  function saveLines() {
-    lines = lines.filter(l => l.qty > 0 || l.pending > 0);
-    save(LS.lines, lines);
+  // ---------- รายการ = ข้อมูลจริงใน Google Sheet (แถว "รอพิมพ์" ของสาขาที่สแกนวันนี้) + สแกนที่ยังส่งไม่ถึง ----------
+  // หลังบ้านลบแถว / เปลี่ยนสถานะเป็นพิมพ์แล้ว / แก้จำนวนในชีต → รายการในเครื่องเปลี่ยนตามในรอบซิงก์ถัดไป
+  const todaySince = () => { const d = new Date(); d.setHours(0, 0, 0, 0); return d.toISOString(); };
+  const keyFor = (artNo, barcode, size) => `${artNo ? "A" + artNo : "B" + norm(barcode)}|${size}`;
+  let serverRows = load(LS.rows, { since: "", rows: [] });
+  if (serverRows.since !== todaySince()) serverRows = { since: todaySince(), rows: [] };
+  function setServerRows(rows) { serverRows = { since: todaySince(), rows: rows || [] }; save(LS.rows, serverRows); }
+
+  function mergedLines() {
+    const m = new Map();
+    for (const r of serverRows.rows) m.set(r.k, { ...r, pending: 0 });
+    for (const e of outbox) {
+      let l = m.get(e.lineKey);
+      if (!l) { l = { k: e.lineKey, artNo: e.artNo, barcode: e.barcode, descr: e.descr, size: e.size, qty: 0, last: e.scannedAt, pending: 0 }; m.set(e.lineKey, l); }
+      l.qty += e.qty; l.pending++;
+      if ((e.scannedAt || "") > (l.last || "")) l.last = e.scannedAt;
+    }
+    return [...m.values()].filter(l => l.qty > 0).sort((a, b) => (b.last || "").localeCompare(a.last || ""));
   }
-  function queueEvent(line, delta, barcode) {
-    outbox.push({ id: uid(), lineKey: line.key, barcode: barcode || line.barcode, artNo: line.artNo, descr: line.descr,
-      dept: line.dept, size: line.size, qty: delta, scannedAt: new Date().toISOString() });
-    line.pending++;
+  const lineOf = (k) => mergedLines().find(l => l.k === k);
+
+  function queueEvent(k, info, delta, barcode) {
+    outbox.push({ id: uid(), lineKey: k, barcode: barcode || info.barcode, artNo: info.artNo || "", descr: info.descr || "",
+      dept: info.dept || "", size: info.size, qty: delta, scannedAt: new Date().toISOString() });
     save(LS.outbox, outbox);
   }
 
   function commit(base, product, quiet) {
-    const key = lineKeyOf(product, base.barcode, base.size);
-    let line = lines.find(l => l.key === key);
-    const isNew = !line;
-    if (isNew) {
-      line = { key, barcode: base.barcode, artNo: product ? product.artNo : "", descr: product ? product.descr : "",
-        dept: product ? product.dept : "", size: base.size, qty: 0, found: !!product && !product.notInDb, pending: 0, sheetQty: null };
-    } else lines.splice(lines.indexOf(line), 1);
-    lines.unshift(line);                       // ย้ายขึ้นบนสุด
-    line.qty += base.qty;
-    queueEvent(line, base.qty, base.barcode);
-    saveLines();
+    const k = keyFor(product ? product.artNo : "", base.barcode, base.size);
+    const before = lineOf(k);
+    queueEvent(k, { artNo: product ? product.artNo : "", descr: product ? product.descr : "", dept: product ? product.dept : "",
+      size: base.size, barcode: base.barcode }, base.qty, base.barcode);
+    const line = lineOf(k);
     if (!quiet) {
       const ok = product && !product.notInDb;
       beep(ok ? "ok" : "warn");
       setHero(ok ? "ok" : "warn", {
-        chip: ["wait", ICON.clock, isNew ? "กำลังบันทึก…" : `เพิ่ม +${base.qty} · กำลังบันทึก…`],
-        size: `${line.size} · ${line.qty} ป้าย`, sz: line.size,
-        art: line.artNo, desc: ok ? line.descr : "ไม่พบในฐานข้อมูล", code: base.barcode
+        chip: ["wait", ICON.clock, before ? `เพิ่ม +${base.qty} · กำลังบันทึก…` : "กำลังบันทึก…"],
+        size: `${base.size} · ${line ? line.qty : base.qty} ป้าย`, sz: base.size,
+        art: product ? product.artNo : "", desc: ok ? product.descr : "ไม่พบในฐานข้อมูล", code: base.barcode
       });
-      heroKey = key;
-      if (!isNew) bump();
+      heroKey = k;
+      if (before) bump();
     }
     render(); flush();
   }
   function bump() { const el = $("heroSize"); el.classList.remove("bump"); void el.offsetWidth; el.classList.add("bump"); }
 
   // ---------- ส่งเข้า Sheet อัตโนมัติ ----------
-  let sending = false, retryTimer = null, lastError = "", heroKey = null;
+  let sending = false, retryTimer = null, lastError = "", heroKey = null, syncSeq = 0;
   const inFlight = new Set();
   async function post(body) {
     const ctrl = new AbortController(); const tm = setTimeout(() => ctrl.abort(), 20000);
@@ -481,31 +489,24 @@ window.CONFIG = {
   }
   function heroSentState() {
     if (pendingChoice || !heroKey) return;
-    const line = lines.find(l => l.key === heroKey);
+    const line = lineOf(heroKey);
     if (!line) return;
     if (line.pending === 0) {
-      const extra = line.sheetQty != null && line.sheetQty > line.qty ? ` · รอพิมพ์ในชีต ${line.sheetQty}` : "";
-      setChip(line.found ? "ok" : "warn", ICON.check, (line.found ? "บันทึกลง Sheet แล้ว" : "บันทึกแล้ว · ไม่พบข้อมูลสินค้า") + extra);
+      $("heroSize").textContent = `${line.size} · ${line.qty} ป้าย`;
+      setChip(line.descr ? "ok" : "warn", ICON.check, line.descr ? "บันทึกลง Sheet แล้ว" : "บันทึกแล้ว · ไม่พบข้อมูลสินค้า");
     } else if (lastError) setChip("err", ICON.cloud, "ยังไม่ส่ง · จะส่งให้อัตโนมัติ");
   }
   async function flush() {
     if (sending || !outbox.length || !C.SHEET_URL) { updateStatus(); return; }
-    sending = true; updateStatus();
+    sending = true; syncSeq++; updateStatus();
     const batch = outbox.slice(0, 100);
     batch.forEach(e => inFlight.add(e.id));
     try {
-      const data = await post({ action: "scan", branch: BRANCH, device: navigator.userAgent.slice(0, 100),
+      const data = await post({ action: "scan", branch: BRANCH, since: todaySince(), device: navigator.userAgent.slice(0, 100),
         items: batch.map(({ id, barcode, artNo, descr, dept, size, qty, scannedAt }) => ({ id, barcode, artNo, descr, dept, size, qty, scannedAt })) });
-      const res = data.results || {};
       const ids = new Set(batch.map(e => e.id));
       outbox = outbox.filter(e => !ids.has(e.id)); save(LS.outbox, outbox);
-      batch.forEach(e => {
-        const line = lines.find(l => l.key === e.lineKey);
-        if (!line) return;
-        line.pending = Math.max(0, line.pending - 1);
-        if (res[e.id] && res[e.id].total != null) line.sheetQty = res[e.id].total;
-      });
-      saveLines();
+      if (Array.isArray(data.rows)) setServerRows(data.rows);
       lastError = "";
     } catch (err) {
       lastError = err?.name === "AbortError" ? "หมดเวลาเชื่อมต่อ" : (err instanceof TypeError ? "ไม่มีสัญญาณ" : (err?.message || String(err)));
@@ -517,23 +518,34 @@ window.CONFIG = {
       if (outbox.length && !lastError) flush();
     }
   }
-  window.addEventListener("online", flush);
-  setInterval(() => { if (outbox.length && !sending) flush(); }, 30000);
+  // ดึงรายการล่าสุดจากชีต (กรณีหลังบ้านลบ/แก้ไข)
+  async function sync() {
+    if (sending || outbox.length || !C.SHEET_URL || document.hidden) return;
+    const seq = ++syncSeq;
+    try {
+      const url = `${C.SHEET_URL}?action=list&branch=${encodeURIComponent(BRANCH)}&since=${encodeURIComponent(todaySince())}`;
+      const res = await fetch(url, { cache: "no-store" });
+      const data = await res.json();
+      if (seq !== syncSeq || sending || outbox.length || !data.ok) return;   // มีสแกนใหม่ระหว่างรอ → ข้ามรอบนี้
+      setServerRows(data.rows); lastError = ""; heroSentState(); render(); updateStatus();
+    } catch {}
+  }
+  window.addEventListener("online", () => { flush(); sync(); });
+  setInterval(() => { if (outbox.length && !sending) flush(); else sync(); }, (C.SYNC_SECONDS || 20) * 1000);
 
   // ---------- ลดจำนวนทีละ 1 (กรณียิงเกิน) ----------
-  function decrement(key) {
-    const line = lines.find(l => l.key === key); if (!line || line.qty <= 0) return;
-    line.qty -= 1;
+  function decrement(k) {
+    const line = lineOf(k); if (!line || line.qty <= 0) return;
     // ถ้ายังมีรายการ + ที่ยังไม่ได้ส่ง ให้หักจากตัวนั้นเลย ไม่ต้องส่งเพิ่ม
-    const ev = [...outbox].reverse().find(e => e.lineKey === key && e.qty > 0 && !inFlight.has(e.id));
+    const ev = [...outbox].reverse().find(e => e.lineKey === k && e.qty > 0 && !inFlight.has(e.id));
     if (ev) {
       ev.qty -= 1;
-      if (ev.qty === 0) { outbox = outbox.filter(e => e !== ev); line.pending = Math.max(0, line.pending - 1); }
+      if (ev.qty === 0) outbox = outbox.filter(e => e !== ev);
       save(LS.outbox, outbox);
-    } else queueEvent(line, -1);
-    saveLines();
-    if (heroKey === key) { $("heroSize").textContent = `${line.size} · ${line.qty} ป้าย`; bump(); }
-    toast(line.qty > 0 ? `ลดเหลือ ${line.qty} ป้าย` : "ลบรายการแล้ว");
+    } else queueEvent(k, line, -1);
+    const after = lineOf(k), left = after ? after.qty : 0;
+    if (heroKey === k) { $("heroSize").textContent = `${line.size} · ${left} ป้าย`; bump(); }
+    toast(left > 0 ? `ลดเหลือ ${left} ป้าย` : "ลบรายการแล้ว");
     tone(600, 0.06);
     render(); flush(); focusBarcode();
   }
@@ -556,25 +568,25 @@ window.CONFIG = {
     if (!C.SHEET_URL) { dot.className = "dot bad"; st.textContent = `ยังไม่ได้ตั้งค่า SHEET_URL · ค้างในเครื่อง ${n} รายการ`; return; }
     if (sending) { dot.className = "dot busy"; st.textContent = `กำลังส่ง ${n} รายการ…`; return; }
     if (n) { dot.className = "dot bad"; st.textContent = `ค้างส่ง ${n} รายการ · ${lastError || "รอส่ง"} · จะลองใหม่อัตโนมัติ`; return; }
-    dot.className = "dot on"; st.textContent = "เชื่อมต่อ Google Sheet แล้ว";
+    dot.className = "dot on"; st.textContent = "เชื่อมต่อ Google Sheet แล้ว · ซิงก์รายการอัตโนมัติ";
   }
   function render() {
-    const t = todayStr();
-    const todays = lines.filter(l => l.key.startsWith(t) && l.qty > 0);
-    $("statScans").textContent = `${todays.length} รายการ`;
-    $("statTags").textContent = `${todays.reduce((a, l) => a + l.qty, 0)} ป้าย`;
-    if (!todays.length) { $("list").innerHTML = '<div class="empty">ยังไม่มีการสแกนวันนี้</div>'; return; }
-    $("list").innerHTML = todays.slice(0, 60).map(l => {
-      const st = l.pending > 0 ? ["wait", ICON.clock] : l.found ? ["ok", ICON.check] : ["warn", ICON.alert];
+    const list = mergedLines();
+    $("statScans").textContent = `${list.length} รายการ`;
+    $("statTags").textContent = `${list.reduce((a, l) => a + l.qty, 0)} ป้าย`;
+    if (!list.length) { $("list").innerHTML = '<div class="empty">ยังไม่มีรายการรอพิมพ์วันนี้</div>'; return; }
+    $("list").innerHTML = list.slice(0, 80).map(l => {
+      const found = !!l.descr;
+      const st = l.pending > 0 ? ["wait", ICON.clock] : found ? ["ok", ICON.check] : ["warn", ICON.alert];
       return `
-      <div class="item${l.found ? "" : " notfound"}">
+      <div class="item${found ? "" : " notfound"}">
         <div class="badge sz-${l.size}">${l.size}<small>×${l.qty}</small></div>
         <div class="info">
           <div class="nm">${esc(l.descr || "ไม่พบในฐานข้อมูล")}</div>
           <div class="sub">${l.artNo ? `<b>${esc(l.artNo)}</b> · ` : ""}${esc(l.barcode)}</div>
         </div>
         <span class="st ${st[0]}">${st[1]}</span>
-        <button class="undo" data-key="${esc(l.key)}" aria-label="ลด 1 ป้าย" title="ลด 1 ป้าย">${ICON.minus}</button>
+        <button class="undo" data-key="${esc(l.k)}" aria-label="ลด 1 ป้าย" title="ลด 1 ป้าย">${ICON.minus}</button>
       </div>`;
     }).join("");
   }
@@ -605,8 +617,7 @@ window.CONFIG = {
   if (!C.SHEET_URL) $("cfgErr").classList.remove("hide");
   setChip("", ICON.scan, "พร้อมสแกน");
   setSize(SIZES.includes(currentSize) ? currentSize : "A4");
-  lines = lines.filter(l => l.key.startsWith(todayStr()) || l.pending > 0); saveLines();
-  render(); updateStatus(); focusBarcode(); flush(); loadDb();
+  render(); updateStatus(); focusBarcode(); flush(); sync(); loadDb();
 })();
 </script>
 </body>
