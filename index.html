@@ -15,7 +15,7 @@
  * ===================================================================== */
 window.CONFIG = {
   // วาง Google Apps Script Web App URL (ลงท้ายด้วย /exec)
-  SHEET_URL: "https://script.google.com/macros/s/AKfycbwx5SoUdGXEgUiC_VrU72k5d4XDt7ARs3YkM5Pgv0o98NXclWPTH_N8EyjB95gHI_xV5A/exec",
+  SHEET_URL: "",
   // ชื่อสาขา (เปลี่ยนต่อเครื่องได้ด้วยลิงก์ ...index.html?branch=ชื่อสาขา)
   BRANCH: "สาขาสุพรรณบุรี",
   // ขนาดป้ายเริ่มต้น (หรือ ?size=A5)
@@ -195,6 +195,7 @@ window.CONFIG = {
   .item .st{flex:0 0 auto;color:var(--faint)}
   .item .st.ok{color:var(--ok)}.item .st.warn{color:var(--warn)}.item .st.wait{color:#0284c7}
   .item .undo{flex:0 0 auto;border:1.5px solid var(--line);background:#fff;color:var(--muted);width:32px;height:32px;border-radius:9px;display:grid;place-items:center;cursor:pointer}
+  .item .undo.del{color:var(--err);border-color:#f3c9c9}
   .item .undo:active{background:var(--err-soft);color:var(--err)}
   .item.cancel{opacity:.45}.item.cancel .nm{text-decoration:line-through}
   .item.notfound .badge{background:var(--warn-soft);color:var(--warn)}
@@ -334,6 +335,7 @@ window.CONFIG = {
     clock: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>',
     cloud: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M2 2l20 20M5.8 5.8A6 6 0 0 0 7 18h10a4 4 0 0 0 2.4-.8M21.9 14.5A4 4 0 0 0 17.5 10a6 6 0 0 0-7.4-4.5"/></svg>',
     scan: '<svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M3 7V5a2 2 0 0 1 2-2h2M17 3h2a2 2 0 0 1 2 2v2M21 17v2a2 2 0 0 1-2 2h-2M7 21H5a2 2 0 0 1-2-2v-2M7 12h10"/></svg>',
+    trash: '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18M8 6V4h8v2M19 6l-1 14H6L5 6M10 11v6M14 11v6"/></svg>',
     minus: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M6 12h12"/></svg>',
     x: '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>',
     ban: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="m5.7 5.7 12.6 12.6"/></svg>'
@@ -673,21 +675,29 @@ window.CONFIG = {
   window.addEventListener("online", () => { flush(); sync(); });
   setInterval(() => { if (outbox.length && !sending) flush(); else sync(); }, (C.SYNC_SECONDS || 20) * 1000);
 
-  // ---------- ลดจำนวนทีละ 1 (กรณียิงเกิน) ----------
-  function decrement(k) {
+  // ---------- ลด / ลบรายการ (ลบจนเหลือ 0 → แถวในชีตถูกลบด้วย) ----------
+  function decrement(k, n = 1) {
     const line = lineOf(k); if (!line || line.qty <= 0) return;
-    // ถ้ายังมีรายการ + ที่ยังไม่ได้ส่ง ให้หักจากตัวนั้นเลย ไม่ต้องส่งเพิ่ม
-    const ev = [...outbox].reverse().find(e => e.lineKey === k && e.qty > 0 && !inFlight.has(e.id));
-    if (ev) {
-      ev.qty -= 1;
-      if (ev.qty === 0) outbox = outbox.filter(e => e !== ev);
-      save(LS.outbox, outbox);
-    } else queueEvent(k, line, -1);
+    n = Math.min(n, line.qty);
+    let rest = n;
+    // หักจากรายการ + ที่ยังไม่ได้ส่งก่อน (ไม่ต้องส่งเพิ่ม)
+    for (const ev of [...outbox].reverse()) {
+      if (!rest) break;
+      if (ev.lineKey !== k || ev.qty <= 0 || inFlight.has(ev.id)) continue;
+      const take = Math.min(ev.qty, rest); ev.qty -= take; rest -= take;
+    }
+    outbox = outbox.filter(e => e.qty !== 0); save(LS.outbox, outbox);
+    if (rest) queueEvent(k, line, -rest);
     const after = lineOf(k), left = after ? after.qty : 0;
     if (heroKey === k) { $("heroSize").textContent = `${line.size} · ${left} ป้าย`; bump(); }
     toast(left > 0 ? `ลดเหลือ ${left} ป้าย` : "ลบรายการแล้ว");
     tone(600, 0.06);
     render(); flush(); focusBarcode();
+  }
+  function removeLine(k) {
+    const line = lineOf(k); if (!line) return;
+    if (confirm(`ลบ "${line.descr || line.barcode}" (${line.size} × ${line.qty}) ออกจากรายการและ Google Sheet?`)) decrement(k, line.qty);
+    else focusBarcode();
   }
 
   // ---------- แสดงผล ----------
@@ -726,12 +736,23 @@ window.CONFIG = {
           <div class="sub">${l.artNo ? `<b>${esc(l.artNo)}</b> · ` : ""}${esc(l.barcode)}</div>
         </div>
         <span class="st ${st[0]}">${st[1]}</span>
-        <button class="undo" data-key="${esc(l.k)}" aria-label="ลด 1 ป้าย" title="ลด 1 ป้าย">${ICON.minus}</button>
+        <button class="undo${l.qty === 1 ? " del" : ""}" data-key="${esc(l.k)}" aria-label="${l.qty === 1 ? "ลบรายการ" : "ลด 1 ป้าย (กดค้างเพื่อลบทั้งหมด)"}">${l.qty === 1 ? ICON.trash : ICON.minus}</button>
       </div>`;
     }).join("");
   }
+  // กดค้างที่ปุ่ม − = ลบทั้งรายการ
+  let pressTimer = null, longPressed = false;
+  $("list").addEventListener("pointerdown", (e) => {
+    const b = e.target.closest("button.undo"); if (!b) return;
+    longPressed = false;
+    pressTimer = setTimeout(() => { longPressed = true; try { navigator.vibrate?.(40); } catch {} removeLine(b.dataset.key); }, 600);
+  });
+  ["pointerup", "pointerleave", "pointercancel"].forEach(ev => $("list").addEventListener(ev, () => clearTimeout(pressTimer)));
+  $("list").addEventListener("contextmenu", (e) => { if (e.target.closest("button.undo")) e.preventDefault(); });
   $("list").addEventListener("click", (e) => {
-    const b = e.target.closest("button.undo"); if (b) decrement(b.dataset.key);
+    const b = e.target.closest("button.undo"); if (!b) return;
+    if (longPressed) { longPressed = false; return; }
+    if (b.classList.contains("del")) removeLine(b.dataset.key); else decrement(b.dataset.key);
   });
 
   // ---------- กล้อง (CONFIG.ENABLE_CAMERA) ----------
