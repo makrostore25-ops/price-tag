@@ -399,11 +399,12 @@ window.CONFIG = {
     byBarcode.clear(); byArt.clear();
     for (const [bc, art, descr, dept] of obj.items) {
       const p = { artNo: String(art), descr: String(descr ?? ""), dept: String(dept ?? "") };
+      if (!byArt.has(p.artNo) || (byArt.get(p.artNo).descr === "" && p.descr)) byArt.set(p.artNo, p);
+      if (!bc) continue;                                       // ไม่มีบาร์โค้ด → ค้นด้วย Art No อย่างเดียว
       const k = norm(bc), arr = byBarcode.get(k);
       if (!arr) byBarcode.set(k, [p]); else if (!arr.some(x => x.artNo === p.artNo)) arr.push(p);
-      if (!byArt.has(p.artNo)) byArt.set(p.artNo, p);
     }
-    db = { version: obj.version, count: obj.items.length, loadedAt: obj.loadedAt };
+    db = { version: obj.version, count: byArt.size, loadedAt: obj.loadedAt };
   }
   function dbInfo(extra) {
     const t = db.loadedAt ? new Date(db.loadedAt).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "-";
@@ -509,13 +510,20 @@ window.CONFIG = {
   });
   $("staffClose").addEventListener("click", () => { if (hasStaff()) { $("staffPick").classList.add("hide"); focusBarcode(); } });
 
-  // บาร์โค้ดภายในร้าน 13 หลักขึ้นต้นด้วย 250000 → Art No คือหลักที่ 7–12 (เช่น 2500002503151 → 250315)
-  const inStoreArt = (code) => /^250000\d{7}$/.test(code) ? code.slice(6, 12).replace(/^0+(?=.)/, "") : "";
+  // บาร์โค้ดภายในร้าน → ดึง Art No จากตัวบาร์โค้ด
+  //  • 13 หลัก ขึ้นต้น 250000 → หลักที่ 7–12   (2500002503151 → 250315)
+  //  • 8 หลัก  ขึ้นต้น 2      → ตัดตัวหน้าและตัวท้าย = หลักที่ 2–7   (27593509 → 759350)
+  const strip0 = (x) => x.replace(/^0+(?=.)/, "");
+  const art13 = (code) => /^250000\d{7}$/.test(code) ? strip0(code.slice(6, 12)) : "";
+  const art8 = (code) => /^2\d{7}$/.test(code) ? strip0(code.slice(1, 7)) : "";
+  const inStoreArt = (code) => art13(code) || art8(code);
   function lookup(code) {
-    const art25 = inStoreArt(code);
-    if (art25 && byArt.has(art25)) return [byArt.get(art25)];
+    const a13 = art13(code);
+    if (a13 && byArt.has(a13)) return [byArt.get(a13)];
     const k = norm(code), hits = byBarcode.get(k);
-    if (hits && hits.length) return hits;
+    if (hits && hits.length) return hits;              // บาร์โค้ด 8 หลักที่มีในฐานข้อมูลตรง ๆ ใช้ตามฐานข้อมูลก่อน
+    const a8 = art8(code);
+    if (a8 && byArt.has(a8)) return [byArt.get(a8)];
     const a = byArt.get(k);
     return a ? [a] : [];
   }
@@ -595,7 +603,7 @@ window.CONFIG = {
       return;
     }
     const art25 = inStoreArt(barcode);
-    // ไม่อยู่ในฐานข้อมูล แต่เป็นบาร์โค้ด 25… → ยังได้ Art No จากหลัก 7–12
+    // ไม่อยู่ในฐานข้อมูล แต่เป็นบาร์โค้ดภายในร้าน → ยังได้ Art No จากตัวบาร์โค้ด
     commit(base, hits[0] || (art25 ? { artNo: art25, descr: "", dept: "", notInDb: true } : null), false);
   }
   $("choices").addEventListener("click", (e) => {
