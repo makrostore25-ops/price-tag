@@ -20,10 +20,22 @@ window.CONFIG = {
   BRANCH: "สาขาสุพรรณบุรี",
   // ขนาดป้ายเริ่มต้น (หรือ ?size=A5)
   DEFAULT_SIZE: "A4",
-  // ไฟล์ฐานข้อมูลสินค้า (สร้างจาก data/DataItem.xlsx)
-  PRODUCTS_URL: "products.json",
   // เสียง/สั่นเมื่อสแกน
   BEEP: true,
+  // แผนกให้เลือกในหน้าใส่ชื่อ (name = ข้อความที่แสดงและบันทึกลงชีต)
+  DEPARTMENTS: [
+    { name: "FRUIT & VEGETABLES", icon: "🥬" },
+    { name: "BUTCHERY",           icon: "🥩" },
+    { name: "FISH",               icon: "🐟" },
+    { name: "BAKERY",             icon: "🥖" },
+    { name: "FROZEN",             icon: "🧊" },
+    { name: "DRY FOOD 1",         icon: "🍚" },  // ข้าวสาร ซอส เครื่องดื่ม
+    { name: "DRY FOOD 2",         icon: '<svg width="25" height="27" viewBox="0 0 22 24" aria-hidden="true"><path d="M4 3.5h14l-.9 3.2c1.3 3.4 1.3 7.6.2 11.3l1 2.5H3.7l1-2.5C3.6 14.3 3.6 10.1 4.9 6.7z" fill="#ef4444"/><path d="M4 3.5l1.17 1.2 1.17-1.2 1.16 1.2 1.17-1.2 1.16 1.2 1.17-1.2 1.17 1.2 1.16-1.2 1.17 1.2 1.16-1.2 1.17 1.2L18 3.5" fill="none" stroke="#b91c1c" stroke-width="1.1" stroke-linejoin="round"/><path d="M3.7 20.5l1.15-1.2 1.15 1.2 1.15-1.2 1.15 1.2 1.15-1.2 1.15 1.2 1.15-1.2 1.15 1.2 1.15-1.2 1.15 1.2 1.15-1.2 1.15 1.2 1.15-1.2 1.15 1.2" fill="none" stroke="#b91c1c" stroke-width="1.1" stroke-linejoin="round"/><ellipse cx="11" cy="12" rx="4.6" ry="3.6" fill="#facc15"/><path d="M8.6 12.4c.9-1.6 3.3-2.1 4.9-.9-.6 1.5-2.9 2.2-4.9.9z" fill="#f59e0b"/></svg>' },  // ขนมขบเคี้ยวแบบห่อ (snack) เครื่องสำอาง
+    { name: "NON FOOD 1",         icon: "🔌" },  // เครื่องใช้ไฟฟ้า
+    { name: "NON FOOD 2",         icon: "🗑️" }    // ถุงขยะ กล่องพลาสติก
+  ],
+  // รูปแบบเลือกแผนก: "buttons" = ปุ่มแตะเลือก (แนะนำสำหรับ HHT) หรือ "dropdown"
+  DEPT_STYLE: "buttons",
   // ดึงรายการจากชีตทุกกี่วินาที (สะท้อนการลบ/แก้ไขจากหลังบ้าน)
   SYNC_SECONDS: 20,
   // เปิดปุ่มกล้องสำหรับมือถือที่ไม่มีหัวสแกน (true/false)
@@ -52,8 +64,37 @@ window.CONFIG = {
   .brand{display:flex;align-items:center;gap:8px;min-width:0}
   .brand .logo{width:26px;height:26px;border-radius:8px;background:rgba(255,255,255,.14);display:grid;place-items:center;flex:0 0 auto}
   .brand h1{font-size:15px;font-weight:700;margin:0;letter-spacing:.1px;white-space:nowrap}
-  .branch{display:flex;align-items:center;gap:4px;font-size:11.5px;font-weight:500;background:rgba(255,255,255,.12);
-    padding:4px 10px 4px 7px;border-radius:999px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:55%}
+  .titles{display:flex;flex-direction:column;min-width:0;line-height:1.2}
+  .who{display:flex;align-items:center;gap:6px;border:0;color:#fff;font-size:12.5px;font-weight:600;background:rgba(255,255,255,.14);
+    padding:6px 11px 6px 9px;border-radius:999px;cursor:pointer;max-width:50%;white-space:nowrap}
+  .who span{overflow:hidden;text-overflow:ellipsis}
+  .who.need{background:#fff;color:var(--brand-dark);animation:pulse 1.4s infinite}
+  .overlay{position:fixed;inset:0;z-index:60;background:rgba(10,20,18,.55);display:flex;align-items:flex-end;justify-content:center}
+  .sheet{background:#fff;width:100%;max-width:520px;max-height:92vh;overflow:auto;border-radius:18px 18px 0 0;padding:16px 14px 18px;display:flex;flex-direction:column;gap:10px;
+    box-shadow:0 -8px 30px rgba(0,0,0,.2)}
+  .sheet-head{display:flex;justify-content:space-between;align-items:flex-start;gap:8px}
+  .sheet h2{margin:0;font-size:17px}
+  .sheet p{margin:2px 0 0;font-size:12.5px;color:var(--muted)}
+  .sheet .x{border:0;background:#eef2f0;border-radius:9px;width:32px;height:32px;cursor:pointer;color:var(--muted);font-size:16px}
+  .sheet input{padding:13px 14px;font-size:17px}
+  .fl{font-size:12.5px;font-weight:600;color:var(--muted);margin:2px 0 -6px}
+  #staffDept{width:100%;padding:12px 40px 12px 14px;font-size:17px;font-family:inherit;color:var(--ink);background:#fff;border:1.5px solid var(--line);
+    border-radius:12px;appearance:none;-webkit-appearance:none;
+    background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2361716d' stroke-width='2.5' stroke-linecap='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+    background-repeat:no-repeat;background-position:right 14px center}
+  #staffDept:focus{outline:none;border-color:var(--brand);box-shadow:0 0 0 3px var(--brand-soft)}
+  #staffDept.empty{color:var(--faint)}
+  .dept-grid{display:grid;grid-template-columns:1fr 1fr;gap:7px;overflow:auto}
+  .dept-grid button{display:flex;align-items:center;gap:8px;border:1.5px solid var(--line);background:#fff;border-radius:12px;
+    padding:10px 10px;font-size:12.5px;font-weight:700;letter-spacing:.3px;color:var(--ink);cursor:pointer;text-align:left;line-height:1.2;min-height:48px}
+  .dept-grid button i{font-style:normal;font-size:19px;flex:0 0 24px;display:flex;justify-content:center}
+  .dept-grid button.on{border-color:var(--brand);background:var(--brand-soft);color:var(--brand-dark);box-shadow:inset 0 0 0 1px var(--brand)}
+  .dept-grid button:last-child:nth-child(odd){grid-column:1/-1}
+  .who small{font-weight:500;opacity:.8}
+  .staff-err{font-size:12.5px;color:var(--err);min-height:16px;margin-top:-4px}
+  .go{border:0;border-radius:12px;background:var(--brand);color:#fff;font-size:15px;font-weight:600;padding:12px;cursor:pointer;width:100%;margin-top:8px}
+  .branch{display:flex;align-items:center;gap:3px;font-size:11px;font-weight:500;opacity:.8;
+    padding:1px 0 0;white-space:nowrap}
 
   .seg-label{display:flex;justify-content:space-between;align-items:center;margin-top:10px;font-size:11px;
     letter-spacing:.4px;color:rgba(255,255,255,.6)}
@@ -189,9 +230,9 @@ window.CONFIG = {
   <div class="top">
     <div class="brand">
       <div class="logo"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4 13.4 20.6a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8Z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg></div>
-      <h1>ขอป้ายราคา</h1>
+      <div class="titles"><h1>ขอป้ายราคา</h1><div class="branch"><svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg><span id="branchName"></span></div></div>
     </div>
-    <div class="branch"><svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg><span id="branchName"></span></div>
+    <button class="who" id="whoBtn" aria-label="เปลี่ยนผู้ใช้งาน"><svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg><span id="whoName">ใส่ชื่อ</span></button>
   </div>
   <div class="seg-label"><span>ขนาดป้าย</span><span>F1–F4</span></div>
   <div class="seg" id="sizeBar" role="radiogroup" aria-label="ขนาดป้าย">
@@ -258,6 +299,22 @@ window.CONFIG = {
   </section>
 </main>
 
+<div class="overlay hide" id="staffPick">
+  <div class="sheet" role="dialog" aria-label="ใส่ชื่อผู้ใช้งาน">
+    <div class="sheet-head">
+      <div><h2>ใครกำลังใช้งาน?</h2><p>ใส่ชื่อและแผนก เพื่อบันทึกว่าใครขอป้าย · <span id="staffBranch"></span></p></div>
+      <button class="x hide" id="staffClose" aria-label="ปิด">✕</button>
+    </div>
+    <label class="fl" for="staffName">ชื่อ / ชื่อเล่น</label>
+    <input id="staffName" placeholder="ชื่อ หรือ ชื่อเล่น" autocomplete="off" autocapitalize="words" enterkeyhint="next" maxlength="40" />
+    <label class="fl">แผนก</label>
+    <select id="staffDept"><option value="">— เลือกแผนก —</option></select>
+    <div class="dept-grid hide" id="deptGrid" role="radiogroup" aria-label="แผนก"></div>
+    <div class="staff-err" id="staffErr"></div>
+    <button class="go" id="staffGo">เริ่มใช้งาน</button>
+  </div>
+</div>
+
 <div class="toast" id="toast"></div>
 
 <script>
@@ -267,7 +324,7 @@ window.CONFIG = {
   const $ = (id) => document.getElementById(id);
   const SIZES = ["A3", "A4", "A5", "A6"];
   const LS = { outbox: "ptag_outbox3", rows: "ptag_rows", size: "ptag_size", qty: "ptag_qty" };
-  const DB_CACHE = "ptag-db-v1";
+  const DB_CACHE = "ptag-db-v2";
   const params = new URLSearchParams(location.search);
   const BRANCH = params.get("branch") || C.BRANCH || "";
 
@@ -315,28 +372,106 @@ window.CONFIG = {
     else if (kind === "err") { tone(300, 0.35); try { navigator.vibrate?.(300); } catch {} }
   }
 
-  // ---------- ฐานข้อมูลสินค้า ----------
+  // ---------- ฐานข้อมูลสินค้า: ดึงจากชีต Products ใน Google Sheet (ไม่เปิดสาธารณะ) ----------
+  // เก็บสำเนาไว้ในเครื่อง ใช้ได้ทันทีแม้ไม่มีสัญญาณ และเช็กเวอร์ชันใหม่เป็นระยะ (โหลดใหม่เฉพาะเมื่อชีตเปลี่ยน)
   const byBarcode = new Map(), byArt = new Map();
-  async function loadDb() {
-    const url = new URL(C.PRODUCTS_URL, location.href).href;
-    let data = null, offline = false;
-    try {
-      const res = await fetch(url, { cache: "no-cache" });
-      if (!res.ok) throw new Error(res.status);
-      const copy = res.clone(); data = await res.json();
-      try { const c = await caches.open(DB_CACHE); await c.put(url, copy); } catch {}
-    } catch {
-      try { const c = await caches.open(DB_CACHE); const r = await c.match(url); if (r) { data = await r.json(); offline = true; } } catch {}
-    }
-    if (!data) { $("dbInfo").textContent = "โหลดฐานข้อมูลสินค้าไม่ได้ — สแกนได้ แต่ไม่แสดง Art No"; return; }
-    for (const [bc, art, descr, dept] of data.items) {
-      const p = { artNo: String(art), descr, dept: String(dept ?? "") };
+  const DB_KEY = location.origin + "/__ptag_products__";
+  let db = { version: "", count: 0, loadedAt: "" }, dbCheckedAt = 0;
+  function indexDb(obj) {
+    byBarcode.clear(); byArt.clear();
+    for (const [bc, art, descr, dept] of obj.items) {
+      const p = { artNo: String(art), descr: String(descr ?? ""), dept: String(dept ?? "") };
       const k = norm(bc), arr = byBarcode.get(k);
       if (!arr) byBarcode.set(k, [p]); else if (!arr.some(x => x.artNo === p.artNo)) arr.push(p);
       if (!byArt.has(p.artNo)) byArt.set(p.artNo, p);
     }
-    $("dbInfo").textContent = `ฐานข้อมูล ${data.items.length.toLocaleString()} รายการ · อัปเดต ${data.updated || "-"}${offline ? " · ออฟไลน์" : ""}`;
+    db = { version: obj.version, count: obj.items.length, loadedAt: obj.loadedAt };
   }
+  function dbInfo(extra) {
+    const t = db.loadedAt ? new Date(db.loadedAt).toLocaleString("th-TH", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" }) : "-";
+    $("dbInfo").textContent = db.count ? `ฐานข้อมูล ${db.count.toLocaleString()} รายการ · โหลดเมื่อ ${t}${extra ? " · " + extra : ""}`
+      : (extra || "ยังไม่มีฐานข้อมูลสินค้า");
+  }
+  async function loadDb() {
+    try {
+      const c = await caches.open(DB_CACHE); const r = await c.match(DB_KEY);
+      if (r) { indexDb(await r.json()); dbInfo(); }
+    } catch {}
+    await refreshDb();
+  }
+  async function refreshDb() {
+    if (!C.SHEET_URL) { dbInfo(db.count ? "" : "ต้องตั้งค่า SHEET_URL ก่อน"); return; }
+    dbCheckedAt = Date.now();
+    if (!db.count) $("dbInfo").textContent = "กำลังโหลดฐานข้อมูลสินค้าจาก Google Sheet…";
+    try {
+      const res = await fetch(`${C.SHEET_URL}?action=products&v=${encodeURIComponent(db.version)}`, { cache: "no-store" });
+      const d = await res.json();
+      if (!d.ok) throw new Error(d.error || "error");
+      if (d.same) { dbInfo(); return; }
+      const obj = { version: d.version, items: d.items || [], loadedAt: new Date().toISOString() };
+      indexDb(obj); dbInfo(obj.items.length ? "อัปเดตแล้ว" : "ชีต Products ว่าง");
+      try { const c = await caches.open(DB_CACHE); await c.put(DB_KEY, new Response(JSON.stringify(obj), { headers: { "content-type": "application/json" } })); } catch {}
+    } catch {
+      dbInfo(db.count ? "ออฟไลน์" : "โหลดฐานข้อมูลสินค้าไม่ได้ — สแกนได้ แต่ไม่แสดงชื่อสินค้า");
+    }
+  }
+  setInterval(() => { if (!document.hidden) refreshDb(); }, 3 * 60 * 60 * 1000);   // เช็กทุก 3 ชม.
+  document.addEventListener("visibilitychange", () => { if (!document.hidden && Date.now() - dbCheckedAt > 60 * 60 * 1000) refreshDb(); });
+
+  // ---------- ชื่อพนักงาน: พิมพ์ชื่อ/ชื่อเล่นทุกครั้งที่เปิดแอป ----------
+  // เก็บใน sessionStorage: กด Refresh ชื่อไม่หาย / ปิดแท็บหรือปิดเบราว์เซอร์ → ต้องใส่ชื่อใหม่
+  const SS_STAFF = "ptag_staff_session";
+  let staff = null;
+  try { const v = JSON.parse(sessionStorage.getItem(SS_STAFF) || "null"); if (v && v.name && v.section) staff = v; } catch {}
+  const hasStaff = () => !!(staff && staff.name);
+  function showWho() {
+    $("whoName").innerHTML = hasStaff() ? `${esc(staff.name)} <small>· ${esc(staff.section)}</small>` : "ใส่ชื่อ";
+    $("whoBtn").classList.toggle("need", !hasStaff());
+  }
+  const DEPTS = (C.DEPARTMENTS || []).map(d => typeof d === "string" ? { name: d, icon: "" } : d);
+  const useButtons = C.DEPT_STYLE !== "dropdown";
+  $("staffDept").innerHTML = '<option value="">— เลือกแผนก —</option>' + DEPTS.map(d => `<option value="${esc(d.name)}">${esc(d.name)}</option>`).join("");
+  $("deptGrid").innerHTML = DEPTS.map(d => `<button type="button" data-dept="${esc(d.name)}">${d.icon ? `<i>${d.icon}</i>` : ""}<span>${esc(d.name)}</span></button>`).join("");
+  $("staffDept").classList.toggle("hide", useButtons); $("deptGrid").classList.toggle("hide", !useButtons);
+  const deptEmpty = () => {
+    const v = $("staffDept").value;
+    $("staffDept").classList.toggle("empty", !v);
+    document.querySelectorAll("#deptGrid button").forEach(b => { b.classList.toggle("on", b.dataset.dept === v); b.setAttribute("aria-checked", b.dataset.dept === v); });
+  };
+  $("staffDept").addEventListener("change", () => { deptEmpty(); $("staffErr").textContent = ""; });
+  $("deptGrid").addEventListener("click", (e) => {
+    const b = e.target.closest("button[data-dept]"); if (!b) return;
+    $("staffDept").value = b.dataset.dept; deptEmpty(); $("staffErr").textContent = ""; tone(1000, 0.04);
+  });
+  function openStaff() {
+    $("staffName").value = ""; $("staffDept").value = ""; deptEmpty(); $("staffErr").textContent = "";
+    $("staffClose").classList.toggle("hide", !hasStaff());
+    $("staffPick").classList.remove("hide");
+    setTimeout(() => $("staffName").focus(), 50);
+  }
+  function setStaff(name) {
+    name = String(name || "").replace(/\s+/g, " ").trim();
+    if (name.length < 2) { $("staffErr").textContent = "กรุณาพิมพ์ชื่ออย่างน้อย 2 ตัวอักษร"; beep("err"); $("staffName").focus(); return; }
+    const section = $("staffDept").value;
+    if (!section) { $("staffErr").textContent = "กรุณาเลือกแผนก"; beep("err"); if (!useButtons) $("staffDept").focus(); return; }
+    staff = { name: name.slice(0, 40), section };
+    try { sessionStorage.setItem(SS_STAFF, JSON.stringify(staff)); } catch {}
+    $("staffPick").classList.add("hide"); showWho(); toast(`ผู้ใช้งาน: ${staff.name} · ${section}`); focusBarcode();
+  }
+  $("whoBtn").addEventListener("click", openStaff);
+  $("staffGo").addEventListener("click", () => setStaff($("staffName").value));
+  $("staffName").addEventListener("input", () => { $("staffErr").textContent = ""; });
+  $("staffName").addEventListener("keydown", (e) => {
+    if (e.key !== "Enter") return;
+    e.preventDefault();
+    if (!$("staffDept").value && $("staffName").value.trim().length >= 2) {
+      if (useButtons) { $("staffName").blur(); $("staffErr").textContent = "แตะเลือกแผนก"; }
+      else { $("staffDept").focus(); try { $("staffDept").showPicker(); } catch {} }
+    }
+    else setStaff($("staffName").value);
+  });
+  $("staffClose").addEventListener("click", () => { if (hasStaff()) { $("staffPick").classList.add("hide"); focusBarcode(); } });
+
   // บาร์โค้ดภายในร้าน 13 หลักขึ้นต้นด้วย 250000 → Art No คือหลักที่ 7–12 (เช่น 2500002503151 → 250315)
   const inStoreArt = (code) => /^250000\d{7}$/.test(code) ? code.slice(6, 12).replace(/^0+(?=.)/, "") : "";
   function lookup(code) {
@@ -373,7 +508,7 @@ window.CONFIG = {
   $("qty").addEventListener("change", () => setQty(getQty()));
 
   // ---------- โฟกัสช่องบาร์โค้ด ----------
-  function focusBarcode() { const el = $("barcode"); if (document.activeElement !== el) el.focus({ preventScroll: true }); }
+  function focusBarcode() { if (!$("staffPick").classList.contains("hide")) return; const el = $("barcode"); if (document.activeElement !== el) el.focus({ preventScroll: true }); }
   document.addEventListener("click", (e) => { if (!isEditable(e.target) && !e.target.closest("button")) focusBarcode(); });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { focusBarcode(); flush(); sync(); } });
   $("btnKeyboard").addEventListener("click", () => {
@@ -384,6 +519,10 @@ window.CONFIG = {
   // ---------- รับข้อมูลจากหัวสแกน (Keyboard Wedge + Enter/Tab) ----------
   let buf = "", bufStart = 0, lastKey = 0;
   document.addEventListener("keydown", (e) => {
+    if (!$("staffPick").classList.contains("hide")) {          // หน้าใส่ชื่อเปิดอยู่
+      if (e.key === "Enter" && !isEditable(e.target)) { beep("err"); toast("ใส่ชื่อผู้ใช้งานก่อนสแกน"); }
+      return;
+    }
     const fIdx = ["F1", "F2", "F3", "F4"].indexOf(e.key);
     if (fIdx >= 0) { e.preventDefault(); setSize(SIZES[fIdx], true); return; }
     const now = performance.now(), t = e.target;
@@ -406,6 +545,7 @@ window.CONFIG = {
   function scan(raw) {
     const barcode = String(raw).replace(/[\r\n\t]/g, "").trim();
     if (!barcode) return;
+    if (!hasStaff()) { beep("err"); toast("ใส่ชื่อผู้ใช้งานก่อนสแกน"); openStaff(); return; }
     if (pendingChoice) { const pc = pendingChoice; pendingChoice = null; commit(pc, pc.options[0], true); }
     const base = { barcode, size: currentSize, qty: getQty() };
     const hits = lookup(barcode);
@@ -450,7 +590,7 @@ window.CONFIG = {
 
   function queueEvent(k, info, delta, barcode) {
     outbox.push({ id: uid(), lineKey: k, barcode: barcode || info.barcode, artNo: info.artNo || "", descr: info.descr || "",
-      dept: info.dept || "", size: info.size, qty: delta, scannedAt: new Date().toISOString() });
+      dept: info.dept || "", size: info.size, qty: delta, staff: hasStaff() ? staff.name : "", section: hasStaff() ? staff.section : "", scannedAt: new Date().toISOString() });
     save(LS.outbox, outbox);
   }
 
@@ -503,7 +643,7 @@ window.CONFIG = {
     batch.forEach(e => inFlight.add(e.id));
     try {
       const data = await post({ action: "scan", branch: BRANCH, since: todaySince(), device: navigator.userAgent.slice(0, 100),
-        items: batch.map(({ id, barcode, artNo, descr, dept, size, qty, scannedAt }) => ({ id, barcode, artNo, descr, dept, size, qty, scannedAt })) });
+        items: batch.map(({ id, barcode, artNo, descr, dept, size, qty, staff, section, scannedAt }) => ({ id, barcode, artNo, descr, dept, size, qty, staff, section, scannedAt })) });
       const ids = new Set(batch.map(e => e.id));
       outbox = outbox.filter(e => !ids.has(e.id)); save(LS.outbox, outbox);
       if (Array.isArray(data.rows)) setServerRows(data.rows);
@@ -613,7 +753,8 @@ window.CONFIG = {
   }
 
   // ---------- เริ่มต้น ----------
-  $("branchName").textContent = BRANCH;
+  $("branchName").textContent = BRANCH; $("staffBranch").textContent = BRANCH;
+  showWho(); if (!hasStaff()) openStaff();
   if (!C.SHEET_URL) $("cfgErr").classList.remove("hide");
   setChip("", ICON.scan, "พร้อมสแกน");
   setSize(SIZES.includes(currentSize) ? currentSize : "A4");
