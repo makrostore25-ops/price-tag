@@ -164,6 +164,14 @@ window.CONFIG = {
   .icon-btn{flex:0 0 auto;width:44px;height:44px;border-radius:12px;border:1.5px solid var(--line);background:#fff;color:var(--muted);
     display:grid;place-items:center;cursor:pointer}
   .icon-btn:active{background:var(--brand-soft)}
+  .plu-btn{width:auto;padding:0 11px;font-family:var(--mono);font-weight:700;font-size:13px;color:var(--brand-dark);letter-spacing:.5px}
+  #pluInput{font-family:var(--mono);font-size:30px;font-weight:600;letter-spacing:10px;text-align:center;padding:12px}
+  .plu-hint{font-family:var(--mono);font-size:12px;color:var(--muted);text-align:center;margin-top:-4px}
+  .plu-hint b{color:var(--brand-dark)}
+  .plu-prev{min-height:58px;border-radius:12px;background:#f6f8f7;padding:10px 12px;font-size:14px}
+  .plu-prev.ok{background:var(--ok-soft)} .plu-prev.warn{background:var(--warn-soft)}
+  .plu-prev .a{font-family:var(--mono);font-weight:700;font-size:18px}
+  .plu-prev .d{font-weight:600}
 
   .qty-row{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-top:10px}
   .qty-row label{font-size:13px;color:var(--muted);font-weight:500}
@@ -283,6 +291,7 @@ window.CONFIG = {
         <input id="barcode" inputmode="none" autocomplete="off" autocapitalize="off" spellcheck="false"
                enterkeyhint="go" placeholder="บาร์โค้ด หรือ Art No" aria-label="บาร์โค้ด" />
       </div>
+      <button class="icon-btn plu-btn" id="btnPlu" title="พิมพ์รหัส PLU" aria-label="พิมพ์รหัส PLU">PLU</button>
       <button class="icon-btn" id="btnKeyboard" title="พิมพ์เอง" aria-label="พิมพ์เอง">
         <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><rect x="2" y="5" width="20" height="14" rx="2.5"/><path d="M6 9h.01M10 9h.01M14 9h.01M18 9h.01M6 13h.01M18 13h.01M10 13h4M8 16h8"/></svg>
       </button>
@@ -329,6 +338,20 @@ window.CONFIG = {
     </div>
     <div class="staff-err" id="staffErr"></div>
     <div class="go-bar"><button class="go" id="staffGo">เริ่มใช้งาน</button></div>
+  </div>
+</div>
+
+<div class="overlay hide" id="pluPick">
+  <div class="sheet" role="dialog" aria-label="พิมพ์รหัส PLU">
+    <div class="sheet-head">
+      <div><h2>พิมพ์รหัส PLU</h2><p>สินค้าชั่งน้ำหนัก · ขนาดป้าย <b id="pluSize">A4</b> · <span id="pluQty">1</span> ป้าย</p></div>
+      <button class="x" id="pluClose" aria-label="ปิด">✕</button>
+    </div>
+    <input id="pluInput" inputmode="numeric" pattern="[0-9]*" maxlength="4" autocomplete="off" placeholder="0000" enterkeyhint="done" />
+    <div class="plu-hint" id="pluHint">2100<b>XXXX</b>0000000000000</div>
+    <div class="plu-prev" id="pluPrev">พิมพ์รหัส PLU 1–4 หลัก</div>
+    <div class="staff-err" id="pluErr"></div>
+    <div class="go-bar"><button class="go" id="pluGo">เพิ่มรายการ</button></div>
   </div>
 </div>
 
@@ -424,14 +447,22 @@ window.CONFIG = {
     if (!db.count) $("dbInfo").textContent = "กำลังโหลดฐานข้อมูลสินค้าจาก Google Sheet…";
     try {
       const res = await fetch(`${C.SHEET_URL}?action=products&v=${encodeURIComponent(db.version)}`, { cache: "no-store" });
-      const d = await res.json();
+      const text = await res.text();
+      let d;
+      try { d = JSON.parse(text); }
+      catch {                                            // ได้หน้า error ของ Google แทนข้อมูล → ดึงข้อความมาแสดง
+        const t = (text.match(/<title>([^<]*)<\/title>/i) || [])[1] || "";
+        const body = text.replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, " ").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim();
+        throw new Error(`HTTP ${res.status} ${t} ${body}`.trim().slice(0, 160));
+      }
       if (!d.ok) throw new Error(d.error || "error");
       if (d.same) { dbInfo(); return; }
       const obj = { version: d.version, items: d.items || [], loadedAt: new Date().toISOString() };
       indexDb(obj); dbInfo(obj.items.length ? "อัปเดตแล้ว" : "ชีต Products ว่าง");
       try { const c = await caches.open(DB_CACHE); await c.put(DB_KEY, new Response(JSON.stringify(obj), { headers: { "content-type": "application/json" } })); } catch {}
-    } catch {
-      dbInfo(db.count ? "ออฟไลน์" : "โหลดฐานข้อมูลสินค้าไม่ได้ — สแกนได้ แต่ไม่แสดงชื่อสินค้า");
+    } catch (err) {
+      const why = err instanceof TypeError ? "ไม่มีสัญญาณ" : (err?.message || String(err));
+      dbInfo(db.count ? `ใช้ข้อมูลเดิมในเครื่อง — อัปเดตไม่สำเร็จ: ${why}` : `โหลดฐานข้อมูลสินค้าไม่ได้: ${why}`);
     }
   }
   setInterval(() => { if (!document.hidden) refreshDb(); }, 3 * 60 * 60 * 1000);   // เช็กทุก 3 ชม.
@@ -553,7 +584,7 @@ window.CONFIG = {
   $("qty").addEventListener("change", () => setQty(getQty()));
 
   // ---------- โฟกัสช่องบาร์โค้ด ----------
-  function focusBarcode() { if (!$("staffPick").classList.contains("hide")) return; const el = $("barcode"); if (document.activeElement !== el) el.focus({ preventScroll: true }); }
+  function focusBarcode() { if (!$("staffPick").classList.contains("hide") || !$("pluPick").classList.contains("hide")) return; const el = $("barcode"); if (document.activeElement !== el) el.focus({ preventScroll: true }); }
   document.addEventListener("click", (e) => { if (!isEditable(e.target) && !e.target.closest("button")) focusBarcode(); });
   document.addEventListener("visibilitychange", () => { if (!document.hidden) { focusBarcode(); flush(); sync(); } });
   $("btnKeyboard").addEventListener("click", () => {
@@ -564,6 +595,7 @@ window.CONFIG = {
   // ---------- รับข้อมูลจากหัวสแกน (Keyboard Wedge + Enter/Tab) ----------
   let buf = "", bufStart = 0, lastKey = 0;
   document.addEventListener("keydown", (e) => {
+    if (!$("pluPick").classList.contains("hide")) return;      // หน้าพิมพ์ PLU เปิดอยู่
     if (!$("staffPick").classList.contains("hide")) {          // หน้าใส่ชื่อเปิดอยู่
       if (e.key === "Enter" && !isEditable(e.target)) { beep("err"); toast("ใส่ชื่อผู้ใช้งานก่อนสแกน"); }
       return;
@@ -651,7 +683,8 @@ window.CONFIG = {
       setHero(ok ? "ok" : "warn", {
         chip: ["wait", ICON.clock, before ? `เพิ่ม +${base.qty} · กำลังบันทึก…` : "กำลังบันทึก…"],
         size: `${base.size} · ${line ? line.qty : base.qty} ป้าย`, sz: base.size,
-        art: product ? product.artNo : "", desc: ok ? product.descr : "ไม่พบในฐานข้อมูล", code: base.barcode
+        art: product ? product.artNo : "", desc: ok ? product.descr : "ไม่พบในฐานข้อมูล",
+        code: /^2100\d{4}0{13}$/.test(base.barcode) ? `PLU ${base.barcode.slice(4, 8)} · ${base.barcode}` : base.barcode
       });
       heroKey = k;
       if (before) bump();
@@ -797,6 +830,38 @@ window.CONFIG = {
     if (longPressed) { longPressed = false; return; }
     if (b.classList.contains("del")) removeLine(b.dataset.key); else decrement(b.dataset.key);
   });
+
+  // ---------- PLU: สินค้าชั่งน้ำหนัก บาร์โค้ด = 2100 + PLU 4 หลัก + 0 อีก 13 ตัว ----------
+  const pluBarcode = (plu) => "2100" + String(plu).padStart(4, "0") + "0000000000000";
+  function pluPreview() {
+    const v = $("pluInput").value.replace(/\D/g, "").slice(0, 4);
+    if ($("pluInput").value !== v) $("pluInput").value = v;
+    $("pluErr").textContent = "";
+    $("pluHint").innerHTML = `2100<b>${v ? v.padStart(4, "0") : "XXXX"}</b>0000000000000`;
+    const box = $("pluPrev");
+    if (!v) { box.className = "plu-prev"; box.textContent = "พิมพ์รหัส PLU 1–4 หลัก"; return; }
+    const hit = lookup(pluBarcode(v))[0];
+    if (hit) { box.className = "plu-prev ok"; box.innerHTML = `<div class="a">Art ${esc(hit.artNo)}</div><div class="d">${esc(hit.descr)}</div>`; }
+    else { box.className = "plu-prev warn"; box.textContent = `ไม่พบ PLU ${v.padStart(4, "0")} ในฐานข้อมูล — ยังเพิ่มได้ (ไม่มีชื่อสินค้า)`; }
+  }
+  function openPlu() {
+    if (!hasStaff()) { openStaff(); return; }
+    $("pluInput").value = ""; $("pluSize").textContent = currentSize; $("pluQty").textContent = getQty(); pluPreview();
+    $("pluPick").classList.remove("hide");
+    $("pluInput").focus(); setTimeout(() => $("pluInput").focus(), 50);
+  }
+  function closePlu() { $("pluPick").classList.add("hide"); focusBarcode(); }
+  function submitPlu() {
+    const v = $("pluInput").value.replace(/\D/g, "");
+    if (!v) { $("pluErr").textContent = "กรุณาพิมพ์รหัส PLU"; beep("err"); $("pluInput").focus(); return; }
+    closePlu();
+    scan(pluBarcode(v));
+  }
+  $("btnPlu").addEventListener("click", openPlu);
+  $("pluClose").addEventListener("click", closePlu);
+  $("pluGo").addEventListener("click", submitPlu);
+  $("pluInput").addEventListener("input", pluPreview);
+  $("pluInput").addEventListener("keydown", (e) => { if (e.key === "Enter") { e.preventDefault(); submitPlu(); } if (e.key === "Escape") closePlu(); });
 
   // ---------- กล้อง (CONFIG.ENABLE_CAMERA) ----------
   if (C.ENABLE_CAMERA) {
